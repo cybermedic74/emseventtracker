@@ -1,0 +1,2152 @@
+// EMS Event Tracker (iOS) - Complete Version with Multi-Patient Support
+ import SwiftUI
+
+// MARK: - Authentication Manager
+class AuthenticationManager: ObservableObject {
+    @Published var isAuthenticated = false
+    
+    func authenticate() {
+        // Simple authentication - just enter the app
+        isAuthenticated = true
+    }
+    
+    func logout() {
+        isAuthenticated = false
+    }
+}
+
+// MARK: - Custom Shapes and Icons
+struct StarOfLife: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let center = CGPoint(x: rect.midX, y: rect.midY)
+        let size = min(rect.width, rect.height)
+        let barWidth = size * 0.12
+        let barLength = size * 0.6
+        
+        // Function to add a bar at a specific rotation
+        func addBar(rotation: CGFloat) {
+            var barPath = Path()
+            barPath.addRoundedRect(
+                in: CGRect(
+                    x: -barWidth/2,
+                    y: -barLength/2,
+                    width: barWidth,
+                    height: barLength
+                ),
+                cornerSize: CGSize(width: barWidth/6, height: barWidth/6)
+            )
+            
+            var transform = CGAffineTransform(translationX: center.x, y: center.y)
+            transform = transform.rotated(by: rotation)
+            path.addPath(barPath, transform: transform)
+        }
+        
+        // Add three bars at 60 degree intervals
+        addBar(rotation: .pi / 2) // Vertical
+        addBar(rotation: .pi / 2 + .pi / 3) // Right diagonal
+        addBar(rotation: .pi / 2 - .pi / 3) // Left diagonal
+        
+        // Add Rod of Asclepius (simplified)
+        let staffWidth = barWidth * 0.2
+        let staffLength = barLength * 0.55
+        var staffPath = Path()
+        staffPath.addRoundedRect(
+            in: CGRect(
+                x: -staffWidth/2,
+                y: -staffLength/2,
+                width: staffWidth,
+                height: staffLength
+            ),
+            cornerSize: CGSize(width: staffWidth/2, height: staffWidth/2)
+        )
+        path.addPath(staffPath, transform: CGAffineTransform(translationX: center.x, y: center.y))
+        
+        return path
+    }
+}
+
+struct StarOfLifeView: View {
+    var body: some View {
+        ZStack {
+            // Blue background
+            RoundedRectangle(cornerRadius: 24)
+                .fill(Color(red: 0, green: 0.37, blue: 0.72)) // #005EB8
+            
+            // White star
+            StarOfLife()
+                .fill(Color.white)
+            
+            // Blue snake (simplified)
+            StarOfLife()
+                .stroke(Color(red: 0, green: 0.37, blue: 0.72), lineWidth: 4)
+                .scaleEffect(0.6)
+        }
+        .aspectRatio(1, contentMode: .fit)
+    }
+}
+
+// MARK: - Data Models
+struct Patient: Identifiable, Codable {
+    let id: UUID
+    var name: String
+    var age: String
+    var gender: String
+    var chiefComplaint: String
+    
+    init(name: String, age: String = "", gender: String = "", chiefComplaint: String = "") {
+        self.id = UUID()
+        self.name = name
+        self.age = age
+        self.gender = gender
+        self.chiefComplaint = chiefComplaint
+    }
+}
+
+struct MedicationEntry: Identifiable, Codable {
+    let id: UUID
+    let patientId: UUID
+    let medication: String
+    let dosage: String
+    let route: String
+    let time: Date
+    let notes: String
+    
+    init(patientId: UUID, medication: String, dosage: String, route: String, time: Date, notes: String) {
+        self.id = UUID()
+        self.patientId = patientId
+        self.medication = medication
+        self.dosage = dosage
+        self.route = route
+        self.time = time
+        self.notes = notes
+    }
+}
+
+struct ProcedureEntry: Identifiable, Codable {
+    let id: UUID
+    let patientId: UUID
+    let procedure: String
+    let details: String
+    let time: Date
+    let notes: String
+    
+    init(patientId: UUID, procedure: String, details: String, time: Date, notes: String) {
+        self.id = UUID()
+        self.patientId = patientId
+        self.procedure = procedure
+        self.details = details
+        self.time = time
+        self.notes = notes
+    }
+}
+
+// Completed Call Record
+struct CompletedCall: Identifiable, Codable {
+    let id: UUID
+    let callNumber: String
+    let startTime: Date
+    let timeStamps: [Date?]
+    let patients: [Patient]
+    let medications: [MedicationEntry]
+    let procedures: [ProcedureEntry]
+    let statuses: [String]
+    
+    init(callNumber: String, startTime: Date, timeStamps: [Date?], patients: [Patient], medications: [MedicationEntry], procedures: [ProcedureEntry], statuses: [String]) {
+        self.id = UUID()
+        self.callNumber = callNumber
+        self.startTime = startTime
+        self.timeStamps = timeStamps
+        self.patients = patients
+        self.medications = medications
+        self.procedures = procedures
+        self.statuses = statuses
+    }
+    
+    var totalDuration: String? {
+        guard let start = timeStamps.first(where: { $0 != nil }),
+              let end = timeStamps.last(where: { $0 != nil }) else {
+            return nil
+        }
+        let diff = end!.timeIntervalSince(start!)
+        let minutes = Int(diff) / 60
+        let seconds = Int(diff) % 60
+        return "\(minutes)m \(seconds)s"
+    }
+}
+
+// MARK: - ShareSheet for PDF Export
+struct ShareSheet: UIViewControllerRepresentable {
+    let activityItems: [Any]
+    
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+    }
+    
+    func updateUIViewController(_ uiViewController: UIActivityViewController, context: Context) {}
+}
+
+// MARK: - Authentication View
+struct AuthenticationView: View {
+    @ObservedObject var authManager: AuthenticationManager
+    
+    var body: some View {
+        VStack(spacing: 30) {
+            Spacer()
+            
+            StarOfLifeView()
+                .frame(width: 120, height: 120)
+            
+            VStack(spacing: 16) {
+                Text("EMS Event Tracker")
+                    .font(.title)
+                    .fontWeight(.bold)
+                    .foregroundColor(.white)
+                
+                Text("Secure Medical Data Tracking")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Button(action: {
+                authManager.authenticate()
+            }) {
+                HStack {
+                    Image(systemName: "cross.case.fill")
+                    Text("Enter EMS Tracker")
+                }
+                .font(.headline)
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .frame(maxWidth: .infinity)
+                .padding()
+                .background(Color.blue)
+                .cornerRadius(12)
+            }
+            .padding(.horizontal, 40)
+            
+            Spacer()
+        }
+        .background(Color(red: 0.1, green: 0.1, blue: 0.15).ignoresSafeArea())
+        .preferredColorScheme(.dark)
+    }
+}
+
+// MARK: - Add Patient View
+struct AddPatientView: View {
+    @Environment(\.dismiss) private var dismiss
+    let patientCount: Int
+    let onSave: (Patient) -> Void
+    
+    @State private var patientName: String
+    @State private var age = ""
+    @State private var gender = ""
+    @State private var chiefComplaint = ""
+    
+    let genderOptions = ["Male", "Female", "Other", "Unknown"]
+    
+    init(patientCount: Int, onSave: @escaping (Patient) -> Void) {
+        self.patientCount = patientCount
+        self.onSave = onSave
+        self._patientName = State(initialValue: "Patient \(patientCount + 1)")
+    }
+    
+    private var canSave: Bool {
+        !patientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    var body: some View {
+        VStack {
+            // Header
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                HStack {
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.green)
+                    Text("Add Patient")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+                Spacer()
+                Button("Add Patient") { savePatient() }
+                    .disabled(!canSave)
+                    .fontWeight(.semibold)
+            }
+            .padding()
+            
+            Form {
+                Section("Patient Information") {
+                    TextField("Patient Name/ID", text: $patientName)
+                        .placeholder(when: patientName.isEmpty) {
+                            Text("e.g., Patient 2, John Doe, Pt A")
+                                .foregroundColor(.gray)
+                        }
+                    
+                    HStack {
+                        TextField("Age", text: $age)
+                            .placeholder(when: age.isEmpty) {
+                                Text("25").foregroundColor(.gray)
+                            }
+                            .textFieldStyle(.roundedBorder)
+                        
+                        Picker("Gender", selection: $gender) {
+                            Text("Select...").tag("")
+                            ForEach(genderOptions, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+                
+                Section("Chief Complaint (Optional)") {
+                    TextField("e.g., Chest pain, MVA, Fall", text: $chiefComplaint, axis: .vertical)
+                        .lineLimit(2...3)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+    
+    private func savePatient() {
+        let patient = Patient(
+            name: patientName.trimmingCharacters(in: .whitespacesAndNewlines),
+            age: age.trimmingCharacters(in: .whitespacesAndNewlines),
+            gender: gender,
+            chiefComplaint: chiefComplaint.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+        onSave(patient)
+        dismiss()
+    }
+}
+
+// MARK: - Edit Patient View
+struct EditPatientView: View {
+    @Environment(\.dismiss) private var dismiss
+    let patient: Patient
+    let canDelete: Bool
+    let onSave: (Patient) -> Void
+    let onDelete: () -> Void
+    
+    @State private var patientName: String
+    @State private var age: String
+    @State private var gender: String
+    @State private var chiefComplaint: String
+    @State private var showingDeleteAlert = false
+    
+    let genderOptions = ["Male", "Female", "Other", "Unknown"]
+    
+    init(patient: Patient, canDelete: Bool, onSave: @escaping (Patient) -> Void, onDelete: @escaping () -> Void) {
+        self.patient = patient
+        self.canDelete = canDelete
+        self.onSave = onSave
+        self.onDelete = onDelete
+        self._patientName = State(initialValue: patient.name)
+        self._age = State(initialValue: patient.age)
+        self._gender = State(initialValue: patient.gender)
+        self._chiefComplaint = State(initialValue: patient.chiefComplaint)
+    }
+    
+    private var canSave: Bool {
+        !patientName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+    
+    var body: some View {
+        VStack {
+            // Header
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                HStack {
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.green)
+                    Text("Edit Patient")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+                Spacer()
+                if canDelete {
+                    Button(action: { showingDeleteAlert = true }) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                    }
+                }
+                Button("Save") { savePatient() }
+                    .disabled(!canSave)
+                    .fontWeight(.semibold)
+            }
+            .padding()
+            
+            Form {
+                Section("Patient Information") {
+                    TextField("Patient Name/ID", text: $patientName)
+                    
+                    HStack {
+                        TextField("Age", text: $age)
+                            .placeholder(when: age.isEmpty) {
+                                Text("25").foregroundColor(.gray)
+                            }
+                            .textFieldStyle(.roundedBorder)
+                        
+                        Picker("Gender", selection: $gender) {
+                            Text("Select...").tag("")
+                            ForEach(genderOptions, id: \.self) { option in
+                                Text(option).tag(option)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                }
+                
+                Section("Chief Complaint") {
+                    TextField("e.g., Chest pain, MVA, Fall", text: $chiefComplaint, axis: .vertical)
+                        .lineLimit(2...3)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .alert("Delete Patient?", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                onDelete()
+                dismiss()
+            }
+        } message: {
+            Text("This will permanently delete the patient and all their associated medications and procedures.")
+        }
+    }
+    
+    private func savePatient() {
+        var updatedPatient = patient
+        updatedPatient.name = patientName.trimmingCharacters(in: .whitespacesAndNewlines)
+        updatedPatient.age = age.trimmingCharacters(in: .whitespacesAndNewlines)
+        updatedPatient.gender = gender
+        updatedPatient.chiefComplaint = chiefComplaint.trimmingCharacters(in: .whitespacesAndNewlines)
+        onSave(updatedPatient)
+        dismiss()
+    }
+}
+
+// MARK: - Edit Call Number View
+struct EditCallNumberView: View {
+    @Environment(\.dismiss) private var dismiss
+    let currentCallNumber: String
+    let onSave: (String) -> Void
+    
+    @State private var callNumber: String
+    @State private var errorMessage = ""
+    
+    init(currentCallNumber: String, onSave: @escaping (String) -> Void) {
+        self.currentCallNumber = currentCallNumber
+        self.onSave = onSave
+        self._callNumber = State(initialValue: currentCallNumber)
+    }
+    
+    var body: some View {
+        VStack {
+            // Header
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                HStack {
+                    Image(systemName: "pencil")
+                        .foregroundColor(.blue)
+                    Text("Edit Call Number")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                }
+                Spacer()
+                Button("Save") { saveCallNumber() }
+                    .fontWeight(.semibold)
+            }
+            .padding()
+            
+            Form {
+                Section("Call Number") {
+                    TextField("Call Number", text: $callNumber)
+                        .placeholder(when: callNumber.isEmpty) {
+                            Text("e.g., EMS2024-001, 12345").foregroundColor(.gray)
+                        }
+                        .onChange(of: callNumber) { _ in
+                            errorMessage = ""
+                        }
+                    
+                    if !errorMessage.isEmpty {
+                        Text(errorMessage)
+                            .foregroundColor(.red)
+                            .font(.caption)
+                    }
+                }
+                
+                Section {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Image(systemName: "lightbulb.fill")
+                                .foregroundColor(.blue)
+                            Text("Tips:")
+                                .fontWeight(.semibold)
+                                .foregroundColor(.blue)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("• Use the exact call number from dispatch")
+                            Text("• Can include letters, numbers, and dashes")
+                            Text("• Examples: EMS2024-001, MEDIC123, 2024-0456")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    }
+                    .padding(.vertical, 8)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+    
+    private func saveCallNumber() {
+        let trimmed = callNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        if trimmed.isEmpty {
+            errorMessage = "Call number cannot be empty"
+            return
+        }
+        
+        if trimmed.count > 20 {
+            errorMessage = "Call number too long (max 20 characters)"
+            return
+        }
+        
+        onSave(trimmed)
+        dismiss()
+    }
+}
+
+// MARK: - Procedure Logger View
+struct ProcedureLoggerView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    // Input properties
+    let procedures: [String]
+    let patientId: UUID
+    let patientName: String
+    let onSave: (ProcedureEntry) -> Void
+    
+    // State for the form fields
+    @State private var selectedProcedure = ""
+    @State private var details = ""
+    @State private var notes = ""
+    @State private var customProcedure = ""
+    @State private var useCustomProcedure = false
+    
+    // Computed property to determine if the save button should be enabled
+    private var canSave: Bool {
+        let hasProcedure = useCustomProcedure ? !customProcedure.isEmpty : !selectedProcedure.isEmpty
+        return hasProcedure
+    }
+    
+    var body: some View {
+        VStack {
+            // Header with Cancel and Save buttons
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                VStack {
+                    Text("Log Procedure")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                    Text("Patient: \(patientName)")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                        .fontWeight(.semibold)
+                }
+                Spacer()
+                Button("Save") { saveProcedure() }.disabled(!canSave)
+            }
+            .padding()
+            
+            // Form for procedure entry
+            Form {
+                Section("Procedure") {
+                    Toggle("Custom Procedure", isOn: $useCustomProcedure)
+                    
+                    if useCustomProcedure {
+                        TextField("Enter procedure name", text: $customProcedure)
+                    } else {
+                        Picker("Select Procedure", selection: $selectedProcedure) {
+                            Text("Select...").tag("")
+                            ForEach(procedures, id: \.self) { procedure in
+                                Text(procedure).tag(procedure)
+                            }
+                        }
+                    }
+                }
+                
+                Section("Details") {
+                    TextField("Details (e.g., 18G, Left AC, 2nd attempt)", text: $details)
+                }
+                
+                Section("Notes (Optional)") {
+                    TextField("Additional notes...", text: $notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+    
+    private func saveProcedure() {
+        let procedureName = useCustomProcedure ? customProcedure : selectedProcedure
+        let procedure = ProcedureEntry(patientId: patientId, procedure: procedureName, details: details, time: Date(), notes: notes)
+        onSave(procedure)
+        dismiss()
+    }
+}
+
+// MARK: - Medication Logger View
+struct MedicationLoggerView: View {
+    @Environment(\.dismiss) private var dismiss
+    
+    // Input properties
+    let medications: [String]
+    let routes: [String]
+    let patientId: UUID
+    let patientName: String
+    let onSave: (MedicationEntry) -> Void
+    
+    // State for the form fields
+    @State private var selectedMedication = ""
+    @State private var dosage = ""
+    @State private var selectedRoute = "IV"
+    @State private var notes = ""
+    @State private var customMedication = ""
+    @State private var useCustomMedication = false
+    
+    // Computed property to determine if the save button should be enabled
+    private var canSave: Bool {
+        let hasMedication = useCustomMedication ? !customMedication.isEmpty : !selectedMedication.isEmpty
+        return hasMedication && !dosage.isEmpty
+    }
+    
+    var body: some View {
+        VStack {
+            // Header with Cancel and Save buttons
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                VStack {
+                    Text("Log Medication")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                    Text("Patient: \(patientName)")
+                        .font(.subheadline)
+                        .foregroundColor(.green)
+                        .fontWeight(.semibold)
+                }
+                Spacer()
+                Button("Save") { saveMedication() }.disabled(!canSave)
+            }
+            .padding()
+            
+            // Form for medication entry
+            Form {
+                Section("Medication") {
+                    Toggle("Custom Medication", isOn: $useCustomMedication)
+                    
+                    if useCustomMedication {
+                        TextField("Enter medication name", text: $customMedication)
+                    } else {
+                        Picker("Select Medication", selection: $selectedMedication) {
+                            Text("Select...").tag("")
+                            ForEach(medications, id: \.self) { med in
+                                Text(med).tag(med)
+                            }
+                        }
+                    }
+                }
+                
+                Section("Administration") {
+                    TextField("Dosage (e.g., 1 mg, 250 ml)", text: $dosage)
+                    
+                    Picker("Route", selection: $selectedRoute) {
+                        ForEach(routes, id: \.self) { route in
+                            Text(route).tag(route)
+                        }
+                    }
+                }
+                
+                Section("Notes (Optional)") {
+                    TextField("Additional notes...", text: $notes, axis: .vertical)
+                        .lineLimit(2...4)
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+    }
+    
+    private func saveMedication() {
+        let medicationName = useCustomMedication ? customMedication : selectedMedication
+        let medication = MedicationEntry(patientId: patientId, medication: medicationName, dosage: dosage, route: selectedRoute, time: Date(), notes: notes)
+        onSave(medication)
+        dismiss()
+    }
+}
+
+// MARK: - Patient Management View
+struct PatientManagementView: View {
+    let patients: [Patient]
+    let selectedPatientId: UUID?
+    let medications: [MedicationEntry]
+    let procedures: [ProcedureEntry]
+    let onAddPatient: () -> Void
+    let onEditPatient: () -> Void
+    let onSelectPatient: (UUID) -> Void
+    
+    private func interventionCount(for patientId: UUID) -> Int {
+        let medCount = medications.filter { $0.patientId == patientId }.count
+        let procCount = procedures.filter { $0.patientId == patientId }.count
+        return medCount + procCount
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                HStack {
+                    Image(systemName: "person.fill")
+                        .foregroundColor(.green)
+                    Text("Patients (\(patients.count))")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                }
+                
+                Spacer()
+                
+                Button(action: onAddPatient) {
+                    HStack {
+                        Image(systemName: "plus")
+                        Text("Add Pt")
+                    }
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(Color.green)
+                    .cornerRadius(8)
+                }
+            }
+            
+            ScrollView {
+                VStack(spacing: 8) {
+                    ForEach(patients) { patient in
+                        PatientCardView(
+                            patient: patient,
+                            isSelected: patient.id == selectedPatientId,
+                            interventionCount: interventionCount(for: patient.id),
+                            onSelect: { onSelectPatient(patient.id) },
+                            onEdit: {
+                                onSelectPatient(patient.id)
+                                onEditPatient()
+                            }
+                        )
+                    }
+                }
+            }
+            .frame(maxHeight: 100)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.black.opacity(0.2))
+        .cornerRadius(10)
+    }
+}
+
+// MARK: - Patient Card View
+struct PatientCardView: View {
+    let patient: Patient
+    let isSelected: Bool
+    let interventionCount: Int
+    let onSelect: () -> Void
+    let onEdit: () -> Void
+    
+    private var patientDetails: String {
+        var details: [String] = []
+        if !patient.age.isEmpty { details.append("Age: \(patient.age)") }
+        if !patient.gender.isEmpty { details.append(patient.gender) }
+        if !patient.chiefComplaint.isEmpty { details.append("CC: \(patient.chiefComplaint)") }
+        return details.joined(separator: " | ")
+    }
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(patient.name)
+                    .fontWeight(.semibold)
+                    .foregroundColor(isSelected ? .white : .white.opacity(0.9))
+                
+                if !patientDetails.isEmpty {
+                    Text(patientDetails)
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                        .lineLimit(1)
+                }
+            }
+            
+            Spacer()
+            
+            HStack(spacing: 8) {
+                if interventionCount > 0 {
+                    Text("\(interventionCount)")
+                        .font(.caption)
+                        .fontWeight(.bold)
+                        .foregroundColor(isSelected ? .white : .green)
+                }
+                
+                Button(action: onEdit) {
+                    Image(systemName: "pencil")
+                        .foregroundColor(isSelected ? .white : .green)
+                        .font(.caption)
+                }
+                
+                if isSelected {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                        .font(.system(size: 16))
+                }
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(isSelected ? Color.green.opacity(0.3) : Color.white.opacity(0.05))
+        )
+        .onTapGesture {
+            onSelect()
+        }
+    }
+}
+
+// MARK: - Main Content View
+struct ContentView: View {
+    @StateObject private var authManager = AuthenticationManager()
+    @State private var lastActivity = Date()
+    
+    // MARK: - State Properties
+    @State private var callNumber = "001"
+    @State private var currentStep = 0
+    @State private var timeStamps: [Date?] = Array(repeating: nil, count: 8)
+    @State private var callStartTime = Date()
+    @State private var showingSummary = false
+    @State private var showingMedLog = false
+    @State private var showingProcedureLog = false
+    @State private var medications: [MedicationEntry] = []
+    @State private var procedures: [ProcedureEntry] = []
+    
+    // MARK: - Patient Management State
+    @State private var patients: [Patient] = [Patient(name: "Patient 1")]
+    @State private var selectedPatientId: UUID?
+    @State private var showingAddPatient = false
+    @State private var showingEditPatient = false
+    @State private var showingEditCall = false
+    
+    // MARK: - PDF Export State
+    @State private var showingShareSheet = false
+    @State private var pdfURL: URL?
+    @State private var isExportingPDF = false
+    
+    // MARK: - Call History Storage
+    @AppStorage("completedCalls") private var completedCallsData: Data = Data()
+    @State private var completedCalls: [CompletedCall] = []
+    @State private var showingCallHistory = false
+    
+    // Auto-logout timer
+    @State private var inactivityTimer: Timer?
+    
+    // MARK: - Static Data
+    let statuses = [
+        "Call received", "Enroute", "On scene", "Patient contact",
+        "Left Scene", "Arrival at facility", "Transfer of Care", "Back in service"
+    ]
+    
+    let commonMedications = [
+        "Adenosine", "Albuterol", "Amiodarone", "Aspirin", "Atropine",
+        "Calcium Chloride", "D50W", "Dexamethasone", "Diazepam", "Diltiazem",
+        "Diphenhydramine", "Dopamine", "Epinephrine 1:1,000", "Epinephrine 1:10,000",
+        "Etomidate", "Fentanyl", "Flumazenil", "Ipratropium", "Ketamine",
+        "Lactated Ringers", "Lidocaine", "Lorazepam", "Magnesium Sulfate",
+        "Metoprolol", "Methylprednisolone", "Midazolam", "Morphine", "Naloxone",
+        "Nitroglycerin", "Norepinephrine", "Normal Saline", "Ondansetron",
+        "Rocuronium", "Sodium Bicarbonate", "Succinylcholine", "Thiamine", "Vasopressin"
+    ]
+    
+    let commonProcedures = [
+        "12-Lead EKG", "Backboard", "Bandaging", "Blood Glucose Check", "Blood Pressure",
+        "BVM Ventilation", "C-Collar", "Cardiac Monitor", "Cardioversion", "CPR",
+        "Defibrillation", "External Pacing", "Foley Catheter", "Intubation",
+        "IO Access", "IV Access", "King Airway", "Needle Decompression", "NG Tube",
+        "Oxygen Administration", "Pulse Oximetry", "Splinting"
+    ]
+    
+    let routes = ["IV", "IM", "SQ", "PO", "SL", "Inhaled", "ET", "IO", "PR"]
+    
+    // Helper computed properties
+    private var selectedPatient: Patient? {
+        patients.first { $0.id == selectedPatientId }
+    }
+    
+    private func medicationsForPatient(_ patientId: UUID) -> [MedicationEntry] {
+        medications.filter { $0.patientId == patientId }
+    }
+    
+    private func proceduresForPatient(_ patientId: UUID) -> [ProcedureEntry] {
+        procedures.filter { $0.patientId == patientId }
+    }
+    
+    // MARK: - PDF Export Functions
+    func exportToPDF() -> URL? {
+        print("Starting PDF export...")
+        
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // Standard letter size
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        
+        do {
+            let pdfData = renderer.pdfData { context in
+                context.beginPage()
+                
+                let title = "EMS Call Report - Call #\(callNumber)"
+                let titleAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: 20),
+                    .foregroundColor: UIColor.black
+                ]
+                
+                var yPosition: CGFloat = 50
+                title.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttributes)
+                yPosition += 40
+                
+                // Call details with patient information
+                let details = """
+                Started: \(callStartTime.formatted(date: .abbreviated, time: .standard))
+                Patients: \(patients.count)
+                
+                Timeline:
+                \(getTimelineText())
+                
+                Patients & Interventions:
+                \(getPatientsText())
+                """
+                
+                let detailAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 12),
+                    .foregroundColor: UIColor.black
+                ]
+                
+                let boundingRect = CGRect(x: 50, y: yPosition, width: 500, height: 600)
+                details.draw(in: boundingRect, withAttributes: detailAttributes)
+            }
+            
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let pdfURL = documentsPath.appendingPathComponent("EMS_Call_\(callNumber)_\(Date().timeIntervalSince1970).pdf")
+            
+            try pdfData.write(to: pdfURL)
+            print("PDF written successfully to: \(pdfURL)")
+            return pdfURL
+        } catch {
+            print("Error generating PDF: \(error)")
+            return nil
+        }
+    }
+    
+    func exportAllCallsToPDF() -> URL? {
+        guard !completedCalls.isEmpty else {
+            print("No completed calls to export")
+            return nil
+        }
+        
+        print("Starting all calls PDF export...")
+        
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        
+        do {
+            let pdfData = renderer.pdfData { context in
+                context.beginPage()
+                
+                let title = "EMS Event Tracker - All Calls Report"
+                let titleAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: 20),
+                    .foregroundColor: UIColor.black
+                ]
+                
+                var yPosition: CGFloat = 50
+                title.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttributes)
+                yPosition += 30
+                
+                let dateGenerated = "Generated: \(Date().formatted(date: .abbreviated, time: .standard))"
+                let detailAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 14),
+                    .foregroundColor: UIColor.black
+                ]
+                dateGenerated.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: detailAttributes)
+                yPosition += 40
+                
+                for call in completedCalls {
+                    let callSummary = """
+                    Call #\(call.callNumber)
+                    Date: \(call.startTime.formatted(date: .abbreviated, time: .standard))
+                    Patients: \(call.patients.count)
+                    Duration: \(call.totalDuration ?? "Unknown")
+                    Interventions: \(call.medications.count + call.procedures.count)
+                    
+                    """
+                    
+                    let boundingRect = CGRect(x: 50, y: yPosition, width: 500, height: 200)
+                    callSummary.draw(in: boundingRect, withAttributes: detailAttributes)
+                    yPosition += 100
+                    
+                    // Check if we need a new page
+                    if yPosition > 700 {
+                        context.beginPage()
+                        yPosition = 50
+                    }
+                }
+            }
+            
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let pdfURL = documentsPath.appendingPathComponent("EMS_All_Calls_\(Date().timeIntervalSince1970).pdf")
+            
+            try pdfData.write(to: pdfURL)
+            print("All calls PDF written successfully to: \(pdfURL)")
+            return pdfURL
+        } catch {
+            print("Error generating all calls PDF: \(error)")
+            return nil
+        }
+    }
+    
+    private func exportCurrentCall() {
+        print("Attempting to export current call...")
+        if let url = exportToPDF() {
+            print("PDF generated successfully at: \(url)")
+            pdfURL = url
+            showingShareSheet = true
+        } else {
+            print("Failed to generate PDF")
+            // Could add an alert here to show the error to user
+        }
+    }
+    
+    private func exportAllCalls() {
+        print("Attempting to export all calls...")
+        if let url = exportAllCallsToPDF() {
+            print("All calls PDF generated successfully at: \(url)")
+            pdfURL = url
+            showingShareSheet = true
+        } else {
+            print("Failed to generate all calls PDF")
+        }
+    }
+    
+    private func getTimelineText() -> String {
+        var text = ""
+        for (index, status) in statuses.enumerated() {
+            if let timestamp = timeStamps[index] {
+                text += "\(status): \(timestamp.formatted(date: .omitted, time: .standard))\n"
+            }
+        }
+        return text
+    }
+    
+    private func getPatientsText() -> String {
+        var text = ""
+        for patient in patients {
+            let patientMeds = medicationsForPatient(patient.id)
+            let patientProcs = proceduresForPatient(patient.id)
+            
+            text += "\n\(patient.name):\n"
+            if !patient.age.isEmpty || !patient.gender.isEmpty || !patient.chiefComplaint.isEmpty {
+                var details: [String] = []
+                if !patient.age.isEmpty { details.append("Age: \(patient.age)") }
+                if !patient.gender.isEmpty { details.append("Gender: \(patient.gender)") }
+                if !patient.chiefComplaint.isEmpty { details.append("CC: \(patient.chiefComplaint)") }
+                text += details.joined(separator: " | ") + "\n"
+            }
+            
+            if !patientMeds.isEmpty {
+                text += "Medications:\n"
+                for med in patientMeds {
+                    text += "• \(med.medication) - \(med.dosage) \(med.route) at \(med.time.formatted(date: .omitted, time: .standard))\n"
+                }
+            }
+            
+            if !patientProcs.isEmpty {
+                text += "Procedures:\n"
+                for proc in patientProcs {
+                    text += "• \(proc.procedure) at \(proc.time.formatted(date: .omitted, time: .standard))\n"
+                }
+            }
+        }
+        return text
+    }
+    
+    var body: some View {
+        Group {
+            if authManager.isAuthenticated {
+                mainAppView
+            } else {
+                AuthenticationView(authManager: authManager)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willResignActiveNotification)) { _ in
+            // Logout when app goes to background
+            authManager.logout()
+        }
+    }
+    
+    private var mainAppView: some View {
+        VStack(spacing: 0) {
+            headerView
+            callInfoView
+            
+            // Patient Management Section
+            PatientManagementView(
+                patients: patients,
+                selectedPatientId: selectedPatientId,
+                medications: medications,
+                procedures: procedures,
+                onAddPatient: { showingAddPatient = true },
+                onEditPatient: { showingEditPatient = true },
+                onSelectPatient: { patientId in selectedPatientId = patientId }
+            )
+            .padding(.horizontal, 20)
+            .padding(.bottom, 8)
+            
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(0..<statuses.count, id: \.self) { index in
+                        statusRowView(for: index)
+                    }
+                    
+                    if !medications.isEmpty || !procedures.isEmpty {
+                        interventionsView.padding(.top, 10)
+                    }
+                    
+                    if showingSummary {
+                        summaryView.padding(.top, 10)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 16)
+            }
+            
+            VStack(spacing: 12) {
+                if !showingSummary {
+                    // Show selected patient
+                    if let selectedPatient = selectedPatient {
+                        Text("Selected: \(selectedPatient.name)")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.green)
+                            .padding(.bottom, 4)
+                    }
+                    
+                    HStack(spacing: 12) {
+                        medicationLoggerButton
+                        procedureLoggerButton
+                    }
+                    .padding(.horizontal, 20)
+                }
+                controlsView
+            }
+            .background(Color(red: 0.1, green: 0.1, blue: 0.15))
+        }
+        .background(Color(red: 0.1, green: 0.1, blue: 0.15).ignoresSafeArea())
+        .preferredColorScheme(.dark)
+        .onAppear {
+            loadCompletedCalls()
+            resetInactivityTimer()
+            // Ensure we have a selected patient
+            if selectedPatientId == nil {
+                selectedPatientId = patients.first?.id
+                print("Set initial selected patient: \(selectedPatientId?.uuidString ?? "nil")")
+            }
+            print("Current patients: \(patients.map { $0.name })")
+            print("Selected patient ID: \(selectedPatientId?.uuidString ?? "nil")")
+        }
+        .onTapGesture {
+            resetInactivityTimer()
+        }
+        .sheet(isPresented: $showingMedLog) {
+            MedicationLoggerView(
+                medications: commonMedications,
+                routes: routes,
+                patientId: selectedPatient?.id ?? UUID(),
+                patientName: selectedPatient?.name ?? "Unknown Patient"
+            ) { medication in
+                medications.append(medication)
+                resetInactivityTimer()
+            }
+        }
+        .sheet(isPresented: $showingProcedureLog) {
+            ProcedureLoggerView(
+                procedures: commonProcedures,
+                patientId: selectedPatient?.id ?? UUID(),
+                patientName: selectedPatient?.name ?? "Unknown Patient"
+            ) { procedure in
+                procedures.append(procedure)
+                resetInactivityTimer()
+            }
+        }
+        .sheet(isPresented: $showingCallHistory) {
+            CallHistoryView(completedCalls: completedCalls, onDeleteCall: deleteCall, onExportAll: exportAllCalls)
+        }
+        .sheet(isPresented: $showingAddPatient) {
+            AddPatientView(patientCount: patients.count) { patient in
+                patients.append(patient)
+                selectedPatientId = patient.id
+            }
+        }
+        .sheet(isPresented: $showingEditPatient) {
+            if let patient = selectedPatient {
+                EditPatientView(
+                    patient: patient,
+                    canDelete: patients.count > 1,
+                    onSave: { updatedPatient in
+                        if let index = patients.firstIndex(where: { $0.id == patient.id }) {
+                            patients[index] = updatedPatient
+                        }
+                    },
+                    onDelete: {
+                        // Remove patient and their interventions
+                        patients.removeAll { $0.id == patient.id }
+                        medications.removeAll { $0.patientId == patient.id }
+                        procedures.removeAll { $0.patientId == patient.id }
+                        
+                        // Select first remaining patient
+                        selectedPatientId = patients.first?.id
+                    }
+                )
+            }
+        }
+        .sheet(isPresented: $showingEditCall) {
+            EditCallNumberView(currentCallNumber: callNumber) { newCallNumber in
+                callNumber = newCallNumber
+            }
+        }
+        .sheet(isPresented: $showingShareSheet) {
+            if let pdfURL = pdfURL {
+                ShareSheet(activityItems: [pdfURL])
+                    .onDisappear {
+                        // Clear the PDF URL when done
+                        self.pdfURL = nil
+                    }
+            } else {
+                // Fallback view if PDF URL is nil
+                VStack {
+                    Text("Error generating PDF")
+                        .foregroundColor(.red)
+                    Button("Close") {
+                        showingShareSheet = false
+                    }
+                    .padding()
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+    }
+    
+    // MARK: - Subviews
+    
+    private var headerView: some View {
+        VStack(spacing: 8) {
+            HStack {
+                StarOfLifeView()
+                    .frame(width: 40, height: 40)
+                Text("EMS Event Tracker")
+                    .font(.title2)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                Button(action: { authManager.logout() }) {
+                    Image(systemName: "power")
+                        .foregroundColor(.white.opacity(0.7))
+                }
+            }
+            Text("Emergency Medical Services Timeline")
+                .font(.subheadline)
+                .opacity(0.8)
+        }
+        .foregroundColor(.white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 20)
+        .padding(.horizontal, 20)
+        .background(
+            LinearGradient(
+                colors: [Color.blue, Color(red: 0.1, green: 0.2, blue: 0.4)],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+    }
+    
+    private var callInfoView: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                HStack {
+                    Text("Call #")
+                        .fontWeight(.bold)
+                        .foregroundColor(.white)
+                    
+                    Button(action: { showingEditCall = true }) {
+                        HStack {
+                            Text(callNumber)
+                                .fontWeight(.bold)
+                                .foregroundColor(.white)
+                            Image(systemName: "pencil")
+                                .foregroundColor(.blue)
+                                .font(.caption)
+                        }
+                    }
+                }
+                
+                Spacer()
+                
+                // Start New Call button moved to top right
+                Button(action: startNewCall) {
+                    Text("Start New Call")
+                        .fontWeight(.semibold)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(Color.green)
+                        .cornerRadius(8)
+                }
+            }
+            
+            let statusText: String = currentStep == 0 ?
+                "Ready to start: \(formatDate(callStartTime))" :
+                "Started: \(formatDate(callStartTime)) at \(formatTime(callStartTime))"
+            
+            Text(statusText)
+                .font(.caption)
+                .foregroundColor(.secondary)
+            
+            Text("Tap call number to edit")
+                .font(.caption2)
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(Color.black.opacity(0.2))
+    }
+    
+    private func statusRowView(for index: Int) -> some View {
+        let isCompleted = timeStamps[index] != nil
+        let isActive = !isCompleted && index == currentStep
+        let isDisabled = index > currentStep
+        
+        return HStack {
+            Text(statuses[index])
+                .fontWeight(.semibold)
+                .foregroundColor(isCompleted ? .white : isActive ? .yellow : .white.opacity(0.8))
+            
+            Spacer()
+            
+            if let timestamp = timeStamps[index] {
+                Text(formatTime(timestamp))
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 10)
+            } else {
+                Text("--:--:--")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .padding(.trailing, 10)
+            }
+            
+            Button(action: {
+                markStatus(at: index)
+                resetInactivityTimer()
+            }) {
+                Text(isCompleted ? "✓" : "Mark")
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .frame(width: 60, height: 32)
+                    .background(isCompleted || isDisabled ? Color.gray.opacity(0.5) : Color.blue)
+                    .cornerRadius(6)
+            }
+            .disabled(isCompleted || isDisabled)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isCompleted ? Color.blue.opacity(0.4) :
+                      isActive ? Color.yellow.opacity(0.2) :
+                      Color.white.opacity(0.05))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(isCompleted ? Color.blue :
+                                isActive ? Color.yellow : Color.gray.opacity(0.3), lineWidth: 2)
+                )
+        )
+    }
+    
+    private var medicationLoggerButton: some View {
+        Button(action: {
+            guard let patient = selectedPatient else {
+                print("No selected patient for medication logging")
+                return
+            }
+            print("Opening medication logger for patient: \(patient.name)")
+            showingMedLog = true
+            resetInactivityTimer()
+        }) {
+            HStack {
+                Image(systemName: "pills.fill")
+                Text("Log Med")
+            }
+            .fontWeight(.semibold)
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(selectedPatient != nil ? Color.blue.opacity(0.8) : Color.gray.opacity(0.5))
+            .cornerRadius(10)
+        }
+        .disabled(selectedPatient == nil)
+    }
+    
+    private var procedureLoggerButton: some View {
+        Button(action: {
+            guard let patient = selectedPatient else {
+                print("No selected patient for procedure logging")
+                return
+            }
+            print("Opening procedure logger for patient: \(patient.name)")
+            showingProcedureLog = true
+            resetInactivityTimer()
+        }) {
+            HStack {
+                Image(systemName: "stethoscope")
+                Text("Log Procedure")
+            }
+            .fontWeight(.semibold)
+            .foregroundColor(.white)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(selectedPatient != nil ? Color.green.opacity(0.8) : Color.gray.opacity(0.5))
+            .cornerRadius(10)
+        }
+        .disabled(selectedPatient == nil)
+    }
+    
+    private var interventionsView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "cross.case.fill")
+                Text("Interventions")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                Spacer()
+                Text("\(medications.count + procedures.count)")
+                    .fontWeight(.bold)
+            }
+            .foregroundColor(.blue)
+            .padding(.bottom, 5)
+            
+            // Group interventions by patient
+            ForEach(patients) { patient in
+                let patientMeds = medicationsForPatient(patient.id)
+                let patientProcs = proceduresForPatient(patient.id)
+                
+                if !patientMeds.isEmpty || !patientProcs.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("\(patient.name) (\(patientMeds.count + patientProcs.count))")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.green)
+                        
+                        // Medications for this patient
+                        ForEach(patientMeds) { med in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(med.medication).fontWeight(.semibold)
+                                    HStack {
+                                        Text("\(med.dosage) • \(med.route)")
+                                        if !med.notes.isEmpty {
+                                            Text("• \(med.notes)")
+                                        }
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Text(formatTime(med.time))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.blue)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background(Color.blue.opacity(0.15))
+                            .cornerRadius(6)
+                        }
+                        
+                        // Procedures for this patient
+                        ForEach(patientProcs) { proc in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(proc.procedure).fontWeight(.semibold)
+                                    HStack {
+                                        if !proc.details.isEmpty {
+                                            Text(proc.details)
+                                        }
+                                        if !proc.notes.isEmpty {
+                                            Text("• \(proc.notes)")
+                                        }
+                                    }
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                }
+                                Spacer()
+                                Text(formatTime(proc.time))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.green)
+                            }
+                            .foregroundColor(.white)
+                            .padding(.vertical, 6)
+                            .padding(.horizontal, 10)
+                            .background(Color.green.opacity(0.15))
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+            }
+        }
+        .padding()
+        .background(Color.black.opacity(0.3))
+        .cornerRadius(10)
+    }
+    
+    private var summaryView: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("Call Summary")
+                    .font(.headline)
+                    .fontWeight(.bold)
+                
+                Spacer()
+                
+                // Export to PDF button
+                Button(action: {
+                    isExportingPDF = true
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        exportCurrentCall()
+                        isExportingPDF = false
+                    }
+                }) {
+                    HStack {
+                        if isExportingPDF {
+                            ProgressView()
+                                .scaleEffect(0.8)
+                                .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                        } else {
+                            Image(systemName: "square.and.arrow.up")
+                        }
+                        Text("Export PDF")
+                    }
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(isExportingPDF ? Color.gray : Color.blue)
+                    .cornerRadius(8)
+                }
+                .disabled(isExportingPDF)
+            }
+            .padding(.bottom, 5)
+            
+            ForEach(0..<statuses.count, id: \.self) { index in
+                if let timestamp = timeStamps[index] {
+                    HStack {
+                        Text(statuses[index])
+                        Spacer()
+                        VStack(alignment: .trailing) {
+                            Text(formatTime(timestamp))
+                                .font(.system(.caption, design: .monospaced))
+                            if index > 0, let previousTime = timeStamps[0..<index].compactMap({ $0 }).last {
+                                Text("(+\(calculateDuration(from: previousTime, to: timestamp)))")
+                                    .font(.system(.caption2, design: .monospaced))
+                                    .foregroundColor(.gray)
+                            }
+                        }
+                    }
+                    .padding(.vertical, 2)
+                    if index < statuses.count - 1 && timeStamps[index + 1] != nil { Divider() }
+                }
+            }
+            
+            if let startTime = timeStamps[0], let endTime = timeStamps[7] {
+                Divider().background(Color.blue).frame(height: 2)
+                HStack {
+                    Text("Total Call Duration").fontWeight(.bold)
+                    Spacer()
+                    Text(calculateDuration(from: startTime, to: endTime))
+                        .fontWeight(.bold)
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundColor(.blue)
+                }
+                .padding(.top, 8)
+            }
+            
+            // Patient Summary
+            Divider().padding(.vertical, 8)
+            Text("Patients (\(patients.count))").font(.subheadline).fontWeight(.bold)
+            
+            ForEach(patients) { patient in
+                let patientMeds = medicationsForPatient(patient.id)
+                let patientProcs = proceduresForPatient(patient.id)
+                
+                Text("\(patient.name) - \(patientMeds.count + patientProcs.count) interventions")
+                    .font(.caption)
+                    .foregroundColor(.green)
+                    .fontWeight(.semibold)
+                    .padding(.leading, 8)
+                
+                ForEach(patientMeds) { med in
+                    HStack {
+                        Text("💊 \(med.medication)").fontWeight(.medium)
+                        Spacer()
+                        Text("\(med.dosage) \(med.route)").font(.caption).foregroundColor(.gray)
+                        Text(formatTime(med.time)).font(.system(.caption2, design: .monospaced)).foregroundColor(.blue)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.vertical, 1)
+                }
+                
+                ForEach(patientProcs) { proc in
+                    HStack {
+                        Text("🏥 \(proc.procedure)").fontWeight(.medium)
+                        Spacer()
+                        if !proc.details.isEmpty {
+                            Text(proc.details).font(.caption).foregroundColor(.gray)
+                        }
+                        Text(formatTime(proc.time)).font(.system(.caption2, design: .monospaced)).foregroundColor(.green)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.vertical, 1)
+                }
+            }
+        }
+        .foregroundColor(.white)
+        .padding()
+        .background(Color.black.opacity(0.3))
+        .cornerRadius(10)
+    }
+    
+    private var controlsView: some View {
+        Button(action: {
+            showingCallHistory = true
+            resetInactivityTimer()
+        }) {
+            HStack {
+                Image(systemName: "clock.arrow.circlepath")
+                Text("Call History (\(completedCalls.count))")
+                Spacer()
+                Image(systemName: "chevron.right")
+            }
+            .fontWeight(.semibold)
+            .foregroundColor(.white)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 12)
+            .background(Color.blue.opacity(0.8))
+            .cornerRadius(10)
+        }
+        .padding(.horizontal, 20)
+        .padding(.bottom, 16)
+    }
+    
+    // MARK: - Functions
+    
+    private func resetInactivityTimer() {
+        lastActivity = Date()
+        inactivityTimer?.invalidate()
+        
+        inactivityTimer = Timer.scheduledTimer(withTimeInterval: 600, repeats: false) { _ in
+            // Auto-logout after 10 minutes of inactivity
+            authManager.logout()
+        }
+    }
+    
+    private func markStatus(at index: Int) {
+        timeStamps[index] = Date()
+        if index == currentStep { currentStep = index + 1 }
+        if index == statuses.count - 1 {
+            showingSummary = true
+            // Auto-save call when completed
+            saveCurrentCall()
+        }
+    }
+    
+    private func startNewCall() {
+        // Save current call if it has any timestamps
+        if timeStamps.contains(where: { $0 != nil }) {
+            saveCurrentCall()
+        }
+        
+        // Start new call
+        if let currentNumber = Int(callNumber) {
+            callNumber = String(format: "%03d", currentNumber + 1)
+        }
+        timeStamps = Array(repeating: nil, count: 8)
+        currentStep = 0
+        callStartTime = Date()
+        showingSummary = false
+        medications = []
+        procedures = []
+        
+        // Reset patients to single default patient
+        patients = [Patient(name: "Patient 1")]
+        selectedPatientId = patients.first?.id
+    }
+    
+    private func saveCurrentCall() {
+        // Only save if call was actually started
+        guard timeStamps.contains(where: { $0 != nil }) else { return }
+        
+        let completedCall = CompletedCall(
+            callNumber: callNumber,
+            startTime: callStartTime,
+            timeStamps: timeStamps,
+            patients: patients,
+            medications: medications,
+            procedures: procedures,
+            statuses: statuses
+        )
+        
+        completedCalls.append(completedCall)
+        saveCompletedCalls()
+    }
+    
+    private func saveCompletedCalls() {
+        if let encoded = try? JSONEncoder().encode(completedCalls) {
+            completedCallsData = encoded
+        }
+    }
+    
+    private func loadCompletedCalls() {
+        if let decoded = try? JSONDecoder().decode([CompletedCall].self, from: completedCallsData) {
+            completedCalls = decoded
+            
+            // Set next call number based on last saved call
+            if let lastCall = completedCalls.last,
+               let lastNumber = Int(lastCall.callNumber) {
+                callNumber = String(format: "%03d", lastNumber + 1)
+            }
+        }
+    }
+    
+    private func deleteCall(_ call: CompletedCall) {
+        completedCalls.removeAll { $0.id == call.id }
+        saveCompletedCalls()
+    }
+    
+    private func formatTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter.string(from: date)
+    }
+    
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        return formatter.string(from: date)
+    }
+    
+    private func calculateDuration(from start: Date, to end: Date) -> String {
+        let diff = end.timeIntervalSince(start)
+        let minutes = Int(diff) / 60
+        let seconds = Int(diff) % 60
+        return "\(minutes)m \(seconds)s"
+    }
+}
+
+// MARK: - Call History View
+struct CallHistoryView: View {
+    let completedCalls: [CompletedCall]
+    let onDeleteCall: (CompletedCall) -> Void
+    let onExportAll: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var callToDelete: CompletedCall?
+    @State private var showingDeleteAlert = false
+    
+    var body: some View {
+        NavigationView {
+            List {
+                if completedCalls.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.system(size: 50))
+                            .foregroundColor(.gray)
+                        Text("No completed calls")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        Text("Your completed calls will appear here")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 40)
+                } else {
+                    ForEach(completedCalls.reversed()) { call in
+                        CallHistoryRowView(call: call)
+                    }
+                    .onDelete(perform: deleteRows)
+                }
+            }
+            .navigationTitle("Call History")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    if !completedCalls.isEmpty {
+                        Button("Export All") {
+                            onExportAll()
+                        }
+                        .font(.caption)
+                    }
+                }
+                
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("Done") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+        .preferredColorScheme(.dark)
+        .alert("Delete Call?", isPresented: $showingDeleteAlert) {
+            Button("Cancel", role: .cancel) { }
+            Button("Delete", role: .destructive) {
+                if let call = callToDelete {
+                    onDeleteCall(call)
+                }
+            }
+        } message: {
+            if let call = callToDelete {
+                Text("Are you sure you want to delete Call #\(call.callNumber)? This action cannot be undone.")
+            }
+        }
+    }
+    
+    private func deleteRows(offsets: IndexSet) {
+        for index in offsets {
+            let reversedIndex = completedCalls.count - 1 - index
+            if reversedIndex >= 0 && reversedIndex < completedCalls.count {
+                callToDelete = completedCalls[reversedIndex]
+                showingDeleteAlert = true
+                break // Only handle one deletion at a time
+            }
+        }
+    }
+}
+
+// MARK: - Call History Row View
+struct CallHistoryRowView: View {
+    let call: CompletedCall
+    @State private var isExpanded = false
+    @State private var showingShareSheet = false
+    @State private var pdfURL: URL?
+    
+    private var dateFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }
+    
+    private var timeFormatter: DateFormatter {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        return formatter
+    }
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Header Row
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Call #\(call.callNumber)")
+                        .font(.headline)
+                        .fontWeight(.bold)
+                    
+                    Text(dateFormatter.string(from: call.startTime))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    
+                    Text("\(call.patients.count) patient\(call.patients.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.green)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 4) {
+                    if let duration = call.totalDuration {
+                        Text(duration)
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.blue)
+                    }
+                    
+                    Text("\(call.medications.count + call.procedures.count) interventions")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                // Export button for individual call
+                Button(action: { exportCall(call) }) {
+                    Image(systemName: "square.and.arrow.up")
+                        .foregroundColor(.blue)
+                        .font(.system(size: 16))
+                }
+                .padding(.horizontal, 8)
+                
+                Button(action: { isExpanded.toggle() }) {
+                    Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .foregroundColor(.blue)
+                }
+            }
+            
+            // Expanded Details
+            if isExpanded {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Timeline")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .foregroundColor(.blue)
+                    
+                    ForEach(0..<call.statuses.count, id: \.self) { index in
+                        if let timestamp = call.timeStamps[index] {
+                            HStack {
+                                Text(call.statuses[index])
+                                    .font(.caption)
+                                Spacer()
+                                Text(timeFormatter.string(from: timestamp))
+                                    .font(.system(.caption, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.leading, 8)
+                        }
+                    }
+                    
+                    if !call.medications.isEmpty || !call.procedures.isEmpty {
+                        Text("Patients & Interventions")
+                            .font(.subheadline)
+                            .fontWeight(.semibold)
+                            .foregroundColor(.green)
+                            .padding(.top, 8)
+                        
+                        ForEach(call.patients) { patient in
+                            let patientMeds = call.medications.filter { $0.patientId == patient.id }
+                            let patientProcs = call.procedures.filter { $0.patientId == patient.id }
+                            
+                            if !patientMeds.isEmpty || !patientProcs.isEmpty {
+                                Text("\(patient.name) (\(patientMeds.count + patientProcs.count))")
+                                    .font(.caption)
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.green)
+                                    .padding(.leading, 8)
+                                    .padding(.top, 4)
+                                
+                                ForEach(patientMeds) { med in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("💊 \(med.medication)")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                            Text("\(med.dosage) • \(med.route)")
+                                                .font(.caption2)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        Text(timeFormatter.string(from: med.time))
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.leading, 16)
+                                }
+                                
+                                ForEach(patientProcs) { proc in
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text("🏥 \(proc.procedure)")
+                                                .font(.caption)
+                                                .fontWeight(.medium)
+                                            if !proc.details.isEmpty {
+                                                Text(proc.details)
+                                                    .font(.caption2)
+                                                    .foregroundColor(.secondary)
+                                            }
+                                        }
+                                        Spacer()
+                                        Text(timeFormatter.string(from: proc.time))
+                                            .font(.system(.caption2, design: .monospaced))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .padding(.leading, 16)
+                                }
+                            }
+                        }
+                    }
+                }
+                .padding(.top, 8)
+            }
+        }
+        .padding(.vertical, 8)
+        .sheet(isPresented: $showingShareSheet) {
+            if let pdfURL = pdfURL {
+                ShareSheet(activityItems: [pdfURL])
+                    .onDisappear {
+                        self.pdfURL = nil
+                    }
+            } else {
+                VStack {
+                    Text("Error generating PDF")
+                        .foregroundColor(.red)
+                    Button("Close") {
+                        showingShareSheet = false
+                    }
+                    .padding()
+                }
+                .preferredColorScheme(.dark)
+            }
+        }
+    }
+    
+    private func exportCall(_ call: CompletedCall) {
+        print("Attempting to export individual call: \(call.callNumber)")
+        if let url = exportCallToPDF(call) {
+            print("Individual call PDF generated successfully at: \(url)")
+            pdfURL = url
+            showingShareSheet = true
+        } else {
+            print("Failed to generate individual call PDF")
+        }
+    }
+    
+    private func exportCallToPDF(_ call: CompletedCall) -> URL? {
+        print("Starting individual call PDF export for: \(call.callNumber)")
+        
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let renderer = UIGraphicsPDFRenderer(bounds: pageRect)
+        
+        do {
+            let pdfData = renderer.pdfData { context in
+                context.beginPage()
+                
+                let title = "EMS Call Report - Call #\(call.callNumber)"
+                let titleAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.boldSystemFont(ofSize: 20),
+                    .foregroundColor: UIColor.black
+                ]
+                
+                var yPosition: CGFloat = 50
+                title.draw(at: CGPoint(x: 50, y: yPosition), withAttributes: titleAttributes)
+                yPosition += 40
+                
+                let details = """
+                Started: \(call.startTime.formatted(date: .abbreviated, time: .standard))
+                Patients: \(call.patients.count)
+                
+                Timeline:
+                \(getCallTimelineText(call))
+                
+                Patients & Interventions:
+                \(getCallPatientsText(call))
+                """
+                
+                let detailAttributes: [NSAttributedString.Key: Any] = [
+                    .font: UIFont.systemFont(ofSize: 12),
+                    .foregroundColor: UIColor.black
+                ]
+                
+                let boundingRect = CGRect(x: 50, y: yPosition, width: 500, height: 600)
+                details.draw(in: boundingRect, withAttributes: detailAttributes)
+            }
+            
+            let documentsPath = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let pdfURL = documentsPath.appendingPathComponent("EMS_Call_\(call.callNumber)_\(Date().timeIntervalSince1970).pdf")
+            
+            try pdfData.write(to: pdfURL)
+            print("Individual call PDF written successfully to: \(pdfURL)")
+            return pdfURL
+        } catch {
+            print("Error generating individual call PDF: \(error)")
+            return nil
+        }
+    }
+    
+    private func getCallTimelineText(_ call: CompletedCall) -> String {
+        var text = ""
+        for (index, status) in call.statuses.enumerated() {
+            if let timestamp = call.timeStamps[index] {
+                text += "\(status): \(timestamp.formatted(date: .omitted, time: .standard))\n"
+            }
+        }
+        return text
+    }
+    
+    private func getCallPatientsText(_ call: CompletedCall) -> String {
+        var text = ""
+        for patient in call.patients {
+            let patientMeds = call.medications.filter { $0.patientId == patient.id }
+            let patientProcs = call.procedures.filter { $0.patientId == patient.id }
+            
+            text += "\n\(patient.name):\n"
+            if !patient.age.isEmpty || !patient.gender.isEmpty || !patient.chiefComplaint.isEmpty {
+                var details: [String] = []
+                if !patient.age.isEmpty { details.append("Age: \(patient.age)") }
+                if !patient.gender.isEmpty { details.append("Gender: \(patient.gender)") }
+                if !patient.chiefComplaint.isEmpty { details.append("CC: \(patient.chiefComplaint)") }
+                text += details.joined(separator: " | ") + "\n"
+            }
+            
+            for med in patientMeds {
+                text += "• \(med.medication) - \(med.dosage) \(med.route) at \(med.time.formatted(date: .omitted, time: .standard))\n"
+            }
+            
+            for proc in patientProcs {
+                text += "• \(proc.procedure) at \(proc.time.formatted(date: .omitted, time: .standard))\n"
+            }
+        }
+        return text
+    }
+}
+
+// MARK: - Extension for placeholder text
+extension View {
+    func placeholder<Content: View>(
+        when shouldShow: Bool,
+        alignment: Alignment = .leading,
+        @ViewBuilder placeholder: () -> Content) -> some View {
+
+        ZStack(alignment: alignment) {
+            placeholder().opacity(shouldShow ? 1 : 0)
+            self
+        }
+    }
+}
+
+// MARK: - Preview
+struct ContentView_Previews: PreviewProvider {
+    static var previews: some View {
+        ContentView()
+    }
+}
+
